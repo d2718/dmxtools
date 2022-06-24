@@ -1,0 +1,7 @@
+# Rust stuff
+target/
+Cargo.lock
+
+# The repo doesn't need these
+release.sh
+install.sh
