@@ -20,6 +20,13 @@ use dm_x::{Dmx, Item};
 /// The library of saved access points gets serialized/deserialized from/to this.
 type Library= HashMap<String, WapCfg>;
 
+const USAGE: &str = "
+usage: dmxwifi [ OPTION ] [ ARG ]
+
+where OPTION can be
+    -p, --password      set selected network password to ARG
+";
+
 /// Regex for parsing the ouput of "wpa_cli scan".
 /// needs .multi_line(true).
 const SCAN_RE: &str = r#"^([0-9a-f:]+)\t(\d+)\t(-?\d+)\t[^\t]+\t(.*)$"#;
@@ -237,7 +244,12 @@ impl Item for Wap {
         }
         line.into_bytes()
     }
-} 
+}
+
+fn die(code: i32, message: &str) -> ! {
+    eprintln!("{}", &message);
+    std::process::exit(code);
+}
 
 fn load_library<P: AsRef<Path>>(path: P) -> Result<Library, String> {
     let path = path.as_ref();
@@ -446,11 +458,29 @@ fn connect(cfg: &Config) -> Result<(), String> {
 fn main() {
     let cfg = Config::new();
     
-    if let Some(pwd) = std::env::args().nth(1) {
-        if let Err(e) = set_password(&cfg, &pwd) {
-            eprintln!("{}", &e);
+    // This has pretty simple argument semantics, so we don't use `clap`
+    // or anything.
+    let args: Vec<String> = std::env::args().collect();
+    let action = args.get(1);
+    let arg = args.get(2);
+    
+    match action.map(String::as_str) {
+        Some("-p") | Some("--password") => {
+            if let Some(p) = arg {
+                if let Err(e) = set_password(&cfg, p.as_str()) {
+                    die(1, &e);
+                }
+            } else {
+                die(2, &format!("{} option requires password.", &action.unwrap()));
+            }
+        },
+        Some(opt) => {
+            die(2, &format!("Unknown option: {}\n{}", &opt, USAGE));
         }
-    } else {
-        connect(&cfg).unwrap();
+        None => {
+            if let Err(e) = connect(&cfg) {
+                die(1, &e);
+            }
+        },
     }
 }
