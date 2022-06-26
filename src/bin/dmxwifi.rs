@@ -233,6 +233,48 @@ impl Config {
                 args, &e
             ))
     }
+    
+    /// Attempt to ensure that `wpa_supplicant` is running in a way that
+    /// dmxwifi can interact with.
+    fn ensure_wpa_supplicant(&self) -> Result<(), String> {
+        if let Ok(stat) = self.wpa_cli_cmd()
+            .arg("ping")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            if stat.success() {
+                return Ok(());
+            }
+        }
+        
+        eprintln!("Attempting to restart wpa_supplicant.");
+        let mut cmd = Command::new("sudo");
+        cmd.args(["-A", "killall", "wpa_supplicant"]);
+        if let Some(askpass) = &self.askpass {
+            cmd.env("SUDO_ASKPASS", askpass.as_str());
+        }
+        match cmd.status() {
+            Ok(stat) => match stat.code() {
+                Some(n) => { eprintln!("wpa_supplicant process killed w/exit code: {}", n); },
+                None => { eprintln!("wpa_supplicant process killed w/o exit code."); },
+            },
+            Err(e) => {
+                eprintln!("Error killing wpa_supplicant process: {}", &e);
+            },
+        }
+        
+        let wpa_config_arg = format!("-c{}", &self.wpa_conf);
+        let mut cmd = Command::new("sudo");
+        cmd.args(["-A", "wpa_supplicant", "-B", "-i", &self.interface, &wpa_config_arg]);
+        if let Some(askpass) =&self.askpass {
+            cmd.env("SUDO_ASKPASS", askpass.as_str());
+        }
+        match cmd.status() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("{}", &e)),
+        }
+    }
 }
 
 /// A wireless network configuration/password saved in the `Library`.
@@ -615,6 +657,9 @@ fn connect(cfg: &Config) -> Result<(), String> {
 
 fn main() {
     let cfg = Config::new();
+    if let Err(e) = cfg.ensure_wpa_supplicant() {
+        die(1, &format!("Unable to restart wpa_supplicant: {}", &e));
+    }
     
     // This has pretty simple argument semantics, so we don't use `clap`
     // or anything.
